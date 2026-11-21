@@ -36,8 +36,8 @@ final class Bazarche_Yar_Sync {
   return apply_filters('bazarche_yar_product_payload',$data,$p);
  }
  private function inventory_payload($p){
-  $q=$p->get_stock_quantity();$data=array('user_id'=>absint($this->s['user_id']),'storage_uuid'=>sanitize_text_field($this->s['storage_uuid']),'variables'=>array(),'price'=>(int)round((float)$p->get_price()),'count'=>null===$q?0:max(0,(int)$q),'min_sale'=>1,'max_sale'=>null===$q?1:max(1,(int)$q),'original'=>false,'used'=>false,'weight'=>(int)round((float)$p->get_weight()),'image'=>$p->get_image_id()?esc_url_raw(wp_get_attachment_url($p->get_image_id())):'' );
-  if($p->is_type('variation')){foreach($p->get_variation_attributes() as $k=>$v)$data['variables'][]=array('name'=>wc_attribute_label(str_replace('attribute_','',$k)),'value'=>(string)$v);}
+  $q=$p->get_stock_quantity();$data=array('user_id'=>absint($this->s['user_id']),'storage_uuid'=>sanitize_text_field($this->s['storage_uuid']),'variables'=>array(),'price'=>(int)round((float)$p->get_price()),'count'=>null===$q?($p->is_in_stock()?1:0):max(0,(int)$q),'min_sale'=>1,'max_sale'=>null===$q?1:max(1,(int)$q),'original'=>false,'used'=>false,'weight'=>(int)round((float)$p->get_weight()),'image'=>$p->get_image_id()?esc_url_raw(wp_get_attachment_url($p->get_image_id())):'' );
+  if($p->is_type('variation')){$data['variables']=apply_filters('bazarche_yar_variation_variables',array(),$p);}
   return $data;
  }
  private function find($data,$keys){foreach($keys as $k){if(isset($data[$k])&&is_scalar($data[$k])&&$data[$k]!=='')return (string)$data[$k];foreach(array('data','response') as $nest)if(isset($data[$nest][$k])&&is_scalar($data[$nest][$k])&&$data[$nest][$k]!=='')return (string)$data[$nest][$k];}return '';}
