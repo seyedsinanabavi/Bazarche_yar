@@ -1,161 +1,22 @@
 <?php
-
 defined('ABSPATH') || exit;
-
 final class Bazarche_Yar_API {
-
-    const META_PRODUCT_ID   = '_bazarche_yar_product_id';
-    const META_INVENTORY_ID = '_bazarche_yar_inventory_id';
-    const META_LAST_SYNC    = '_bazarche_yar_last_sync';
-    const META_LAST_ERROR   = '_bazarche_yar_last_error';
-
-    public function __construct() {
-        add_action('admin_post_bazarche_yar_sync', [$this, 'sync_product']);
-    }
-
-    public function sync_product() {
-        $product_id = absint($_POST['product_id'] ?? 0);
-
-        if (!$product_id || !current_user_can('edit_post', $product_id)) {
-            wp_die('دسترسی غیرمجاز');
-        }
-
-        check_admin_referer('bazarche_yar_sync_' . $product_id);
-
-        if (!class_exists('WooCommerce')) {
-            $this->fail($product_id, 'ووکامرس فعال نیست.');
-        }
-
-        $product = wc_get_product($product_id);
-
-        if (!$product) {
-            $this->fail($product_id, 'محصول پیدا نشد.');
-        }
-
-        $settings        = Bazarche_Yar_Admin::get_settings();
-        $remote_product  = get_post_meta($product_id, self::META_PRODUCT_ID, true);
-        $inventory_id    = get_post_meta($product_id, self::META_INVENTORY_ID, true);
-
-        if (empty($settings['base_url']) || empty($settings['api_key'])) {
-            $this->fail($product_id, 'آدرس API یا کلید API تنظیم نشده است.');
-        }
-
-        if (empty($settings['warehouse_id']) || empty($remote_product)) {
-            $this->fail($product_id, 'شناسهٔ انبار یا شناسهٔ محصول در بازارچه وارد نشده است.');
-        }
-
-        $is_update = !empty($inventory_id);
-
-        if ($is_update) {
-            $endpoint = str_replace(
-                '{id}',
-                rawurlencode($inventory_id),
-                $settings['update_endpoint']
-            );
-            $method = 'PUT';
-        } else {
-            $endpoint = $settings['create_endpoint'];
-            $method   = 'POST';
-        }
-
-        $url = untrailingslashit($settings['base_url']) . '/' . ltrim($endpoint, '/');
-
-        $quantity = $product->get_stock_quantity();
-        $image_id = $product->get_image_id();
-
-        // این فیلدها را در صورت تفاوت با مستندات API خودتان تنظیم کنید.
-        $payload = [
-            'user_id'      => $settings['user_id'],
-            'warehouse_id' => $settings['warehouse_id'],
-            'product_id'   => $remote_product,
-            'price'        => (float) $product->get_price(),
-            'quantity'     => ($quantity === null) ? 0 : (int) $quantity,
-            'weight'       => (float) $product->get_weight(),
-            'status'       => $product->get_stock_status(),
-            'image'        => $image_id ? wp_get_attachment_url($image_id) : '',
-        ];
-
-        $header_name  = $settings['api_key_header'];
-        $header_value = trim($settings['api_key_prefix'] . ' ' . $settings['api_key']);
-
-        $headers = [
-            'Accept'       => 'application/json',
-            'Content-Type' => 'application/json',
-        ];
-
-        if (!empty($header_name)) {
-            $headers[$header_name] = $header_value;
-        }
-
-        $response = wp_remote_request($url, [
-            'method'  => $method,
-            'timeout' => 25,
-            'headers' => $headers,
-            'body'    => wp_json_encode($payload),
-        ]);
-
-        if (is_wp_error($response)) {
-            $this->fail($product_id, $response->get_error_message());
-        }
-
-        $status = wp_remote_retrieve_response_code($response);
-        $body   = wp_remote_retrieve_body($response);
-        $data   = json_decode($body, true);
-
-        if ($status < 200 || $status >= 300) {
-            $message = 'پاسخ API: HTTP ' . $status;
-
-            if (is_array($data) && !empty($data['message'])) {
-                $message .= ' — ' . sanitize_text_field($data['message']);
-            }
-
-            $this->fail($product_id, $message);
-        }
-
-        $new_inventory_id = $this->find_inventory_id($data);
-
-        if ($new_inventory_id) {
-            update_post_meta(
-                $product_id,
-                self::META_INVENTORY_ID,
-                sanitize_text_field($new_inventory_id)
-            );
-        }
-
-        update_post_meta($product_id, self::META_LAST_SYNC, current_time('mysql'));
-        delete_post_meta($product_id, self::META_LAST_ERROR);
-
-        Bazarche_Yar_Admin::redirect_with_notice('موجودی با موفقیت همگام‌سازی شد.');
-    }
-
-    private function find_inventory_id($data) {
-        if (!is_array($data)) {
-            return '';
-        }
-
-        $possible_ids = [
-            $data['inventory_id'] ?? '',
-            $data['id'] ?? '',
-            $data['data']['inventory_id'] ?? '',
-            $data['data']['id'] ?? '',
-        ];
-
-        foreach ($possible_ids as $id) {
-            if (is_scalar($id) && (string) $id !== '') {
-                return (string) $id;
-            }
-        }
-
-        return '';
-    }
-
-    private function fail($product_id, $message) {
-        update_post_meta(
-            $product_id,
-            self::META_LAST_ERROR,
-            sanitize_text_field($message)
-        );
-
-        Bazarche_Yar_Admin::redirect_with_notice($message, 'error');
-    }
+ private $s;
+ public function __construct($settings){$this->s=$settings;}
+ public function request($method,$path,$payload=null){
+  $url=untrailingslashit($this->s['base_url']).'/'.ltrim($path,'/');
+  $args=array('method'=>$method,'timeout'=>30,'headers'=>array('Accept'=>'application/json','X-API-KEY'=>trim($this->s['api_key'])));
+  if(null!==$payload){$args['headers']['Content-Type']='application/json';$args['body']=wp_json_encode($payload);}
+  $r=wp_remote_request($url,$args); if(is_wp_error($r))return $r;
+  $code=(int)wp_remote_retrieve_response_code($r);$data=json_decode(wp_remote_retrieve_body($r),true);
+  if($code<200||$code>=300)return new WP_Error('bazarche_http','خطای API بازارچه HTTP '.$code.(is_array($data)&&!empty($data['message'])?': '.sanitize_text_field($data['message']):''),array('status'=>$code,'response'=>$data));
+  if(!is_array($data))return new WP_Error('bazarche_json','پاسخ API معتبر و JSON نیست.');
+  if(isset($data['success'])&&false===$data['success'])return new WP_Error('bazarche_rejected',!empty($data['message'])?sanitize_text_field($data['message']):'API عملیات را نپذیرفت.');
+  return $data;
+ }
+ public function create_product($p){return $this->request('POST','/api/v1/products/create/',$p);}
+ public function storage_products($uuid,$page=1,$per=50){return $this->request('GET','/api/v1/storages/products/'.rawurlencode($uuid).'/?page='.absint($page).'&per_page='.absint($per));}
+ public function product_inventories($uuid,$page=1,$per=50){return $this->request('GET','/api/v1/inventories/product/'.rawurlencode($uuid).'/?page='.absint($page).'&per_page='.absint($per));}
+ public function create_inventory($uuid,$p){return $this->request('POST','/api/v1/inventories/product/'.rawurlencode($uuid).'/create/',$p);}
+ public function update_inventory($uuid,$p){return $this->request('PUT','/api/v1/inventories/update/'.rawurlencode($uuid).'/',$p);}
 }
